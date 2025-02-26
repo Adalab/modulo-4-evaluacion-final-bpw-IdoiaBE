@@ -129,6 +129,16 @@ server.post("/characters", async (req, res)=>{
         const con = await getDBconnection();
 
         //comprobar que ese personaje no existe en la bd
+        const checkCharacter = "SELECT idcharacters FROM characters WHERE name = ?";
+        const [existingCharacter] = await con.query(checkCharacter, [name]);
+
+        if (existingCharacter.length > 0) {
+            con.end();
+            return res.status(409).json({ 
+                status: 'error',
+                message: 'El personaje ya existe en la base de datos',
+            });
+        }
 
         const sqlInsert = "INSERT INTO characters (name, gender, category, alive, religion, social_group, image) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
@@ -186,6 +196,7 @@ server.post("/characters", async (req, res)=>{
           });
     };
 });
+
 
 //Eliminar un personaje
 //DELETE, URL params
