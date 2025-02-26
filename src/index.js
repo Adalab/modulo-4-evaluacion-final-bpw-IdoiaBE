@@ -23,11 +23,11 @@ async function getDBconnection() {
         database: process.env.DATABASE,
     });
     await connection.connect();
-    // console.log(connection);
+    console.log(connection);
     return connection;   
 };
 
-// getDBconnection();
+getDBconnection();
 
 //ENDPOINTS
 
