@@ -29,15 +29,6 @@ async function getDBconnection() {
     return connection;   
 };
 
-// const [rows] = await connection.execute("SELECT * FROM characters");
-
-// const convertedData = rows.map(row => ({
-//   ...row,
-//   alive: !!row.alive // Convierte 1 a true y 0 a false
-// }));
-
-// console.log(convertedData);
-
 //ENDPOINTS
 
 //Obtener lista de personajes ordenados alfabeticamente
@@ -51,9 +42,16 @@ server.get("/characters", async (req, res)=>{
 
         const [result] = await con.query(sqlSelect);
 
+        const transformedResult = result.map(character => ({
+            ...character,
+            alive: character.alive === 1
+        }));
+
+
         con.end();
 
-        if (result.length === 0) {
+
+        if (transformedResult.length === 0) {
             res.status(404).json({
               status: 'error',
               message: 'No se encontró ningún personaje',
@@ -61,7 +59,7 @@ server.get("/characters", async (req, res)=>{
           } else {
             res.status(200).json({
               status: 'success',
-              data: result,
+              data: transformedResult,
             });
           }
         
@@ -86,9 +84,14 @@ server.get("/characters/:id", async (req, res)=>{
 
         const [result] = await con.query(selectById, [id]);
 
+        const transformedResult = result.map(character => ({
+            ...character,
+            alive: character.alive === 1
+        }));
+
         con.end();
 
-        if (result.length === 0) {
+        if (transformedResult.length === 0) {
             res.status(404).json({
               status: 'error',
               message: 'No se encontró ningún personaje',
@@ -96,7 +99,7 @@ server.get("/characters/:id", async (req, res)=>{
           } else {
             res.status(200).json({
               status: 'success',
-              data: result[0],
+              data: transformedResult[0],
             });
           }
         
@@ -111,17 +114,6 @@ server.get("/characters/:id", async (req, res)=>{
 
 //Añadir nuevo personaje
 //POST, body params
-// {
-//     "name": "Piper Chapman",
-//     "alt_names": "Blanca, Blondie, College , Dandelion, Jefa, La Llorona, Pipes, Taylor Swift",
-//     "gender": "Cis woman",
-//     "category": "Inmate",
-//     "alive": 1,
-//     "religion": "Atheist",
-//     "social_group": "White",
-//     "image": "https://ucarecdn.com/f79a0a54-d2dc-4b03-93f7-082b14a95b4b/-/crop/517x517/38,0/-/preview/-/progressive/yes/-/format/auto/-/scale_crop/900x900/",
-//     "seasons_list": "1,2,3,4,5,6,7"
-// }
 server.post("/characters", async (req, res)=>{
     try {
         const {name, alt_names, gender,category, alive, religion, social_group, image, seasons_list} = req.body;
@@ -130,11 +122,13 @@ server.post("/characters", async (req, res)=>{
         if (!name || !alive || !social_group || !seasons_list) {
             return res.status(400).json({
                 status: 'error',
-              message: 'Los campos de name, alive, social_group y seasons_list deben estar rellenos',
+                message: 'Los campos de name, alive, social_group y seasons_list deben estar rellenos',
             });
         };
 
         const con = await getDBconnection();
+
+        //comprobar que ese personaje no existe en la bd
 
         const sqlInsert = "INSERT INTO characters (name, gender, category, alive, religion, social_group, image) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
@@ -148,13 +142,41 @@ server.post("/characters", async (req, res)=>{
             image,
         ]);
 
-        console.log(result);
-
         //recoger el id que se ha creado
         const newId = result.insertId;
+
+       //si hay nombre alternativos, los añado a la tabla AKA
+        if (Array.isArray(alt_names) && alt_names.length > 0){
+            const sqlInsertAKA = `INSERT INTO AKA (alt_name, fk_character) VALUES (?, ?)`;
+
+            for (const eachAltName of alt_names) {
+                await con.query(sqlInsertAKA, [eachAltName, newId]);
+            }
+        };
+
+        const sqlInsertSeasons = "INSERT INTO characters_seasons (fk_characters, fk_seasons) VALUES (?,?)"
+        //añado cada temporada asociada al personaje
+        for (const eachSeason of seasons_list) {
+            await con.query(sqlInsertSeasons, [newId,eachSeason]);
+        };
+
+        //consulta para comprobar si se han añadido todos los datos del personaje
+        const sqlCharacter = "SELECT characters.name,GROUP_CONCAT(DISTINCT AKA.alt_name ORDER BY AKA.alt_name ASC SEPARATOR ', ') AS alt_names, characters.gender, characters.category, characters.alive, characters.religion, characters.social_group, characters.image, GROUP_CONCAT(DISTINCT seasons.season ORDER BY seasons.season ASC) AS seasons_list FROM characters LEFT JOIN AKA ON characters.idcharacters = AKA.fk_character LEFT JOIN characters_seasons ON characters.idcharacters = characters_seasons.fk_characters LEFT JOIN seasons ON characters_seasons.fk_seasons = seasons.idseason WHERE idcharacters = ? GROUP BY characters.idcharacters";
+
+        const [resultCharacter] = await con.query(sqlCharacter, [newId]);
+
+        if (resultCharacter) {
+            res.status(201).json({
+                status: "success",
+                message: resultCharacter[0],
+            });
+          } else {
+            res.status(400).json({
+                status: 'error',
+                message: 'No se insertó',
+            });
+          }
         
-
-
 
         
     } catch (error) {
@@ -177,25 +199,33 @@ server.delete("/characters/:id", async (req, res)=>{
         const deleteCharacter = "DELETE FROM characters WHERE idcharacters = ?";
         
         const deleteAKA = "DELETE FROM AKA WHERE fk_character = ?";
-        const deleteSeason = "DELETE FROM characters_seasons WHERE fk_characters = ?";
+        const deleteSeasons = "DELETE FROM characters_seasons WHERE fk_characters = ?";
 
-        const sqlDelete = `${deleteCharacter}${deleteAKA}${deleteSeason}`
-
-        const [result] = await con.query(sqlDelete, [id]);
+        //Ejecutar las consultas en paralelo
+        const [resultAKA, resultSeasons, resultCharacter] = await Promise.all([
+            con.query(deleteAKA, [id]),
+            con.query(deleteSeasons, [id]),
+            con.query(deleteCharacter, [id])
+        ]);
 
         con.end();
 
-        if (result.affectedRows > 0) {
+        const akaDeleted = resultAKA[0].affectedRows > 0;
+        const seasonsDeleted = resultSeasons[0].affectedRows > 0;
+        const characterDeleted = resultCharacter[0].affectedRows > 0;
+
+        if (akaDeleted || seasonsDeleted || characterDeleted){
             res.status(200).json({ 
-                status: 'success' 
+                status: 'success',
+                message: "Eliminado correctamente" 
             });
-          } else {
+        } else {
             res
               .status(400).json({ 
                 status: 'error', 
-                message: 'ha ocurrido un error al eliminar' 
+                message: 'Ha ocurrido un error al eliminar' 
             });
-          }
+        };
         
     } catch (error) {
         res.status(500).json({

@@ -63,10 +63,10 @@ VALUES (3,1), (3,2), (3,3), (3,4), (3,5), (3,6), (3,7);
 -- eliminar un personaje
 
 DELETE FROM characters 
-WHERE idcharacters = 5;
+WHERE idcharacters = 6;
 
 DELETE FROM AKA 
-WHERE fk_character = 4;
+WHERE fk_character = 6;
 
 DELETE FROM characters_seasons 
-WHERE fk_characters = 4;
+WHERE fk_characters = 6;
